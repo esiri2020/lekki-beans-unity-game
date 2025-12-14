@@ -81,7 +81,10 @@ namespace GameVanilla.Game.UI
         /// </summary>
         private void OnDestroy()
         {
-            PuzzleMatchManager.instance.livesSystem.Unsubscribe(OnLivesCountdownUpdated, OnLivesCountdownFinished);
+            if (PuzzleMatchManager.instance != null)
+            {
+                PuzzleMatchManager.instance.livesSystem.Unsubscribe(OnLivesCountdownUpdated, OnLivesCountdownFinished);
+            }
         }
 
         /// <summary>

@@ -49,7 +49,10 @@ namespace GameVanilla.Game.UI
         /// </summary>
         private void OnDestroy()
         {
-            PuzzleMatchManager.instance.coinsSystem.Unsubscribe(OnCoinsChanged);
+            if (PuzzleMatchManager.instance != null)
+            {
+                PuzzleMatchManager.instance.coinsSystem.Unsubscribe(OnCoinsChanged);
+            }
         }
 
         /// <summary>

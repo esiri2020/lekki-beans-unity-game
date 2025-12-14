@@ -45,7 +45,7 @@
     "rewardedAdCoins": 150,
     "iapItems": [
         {
-            "storeId": "com.gamevanilla.candymatch3.coinspack5",
+            "storeId": "com.lekkibeans.coinspack5",
             "numCoins": 3600,
             "discount": 40,
             "mostPopular": false,
@@ -53,7 +53,7 @@
             "coinIcon": "VeryLarge"
         },
         {
-            "storeId": "com.gamevanilla.candymatch3.coinspack4",
+            "storeId": "com.lekkibeans.coinspack4",
             "numCoins": 1200,
             "discount": 20,
             "mostPopular": false,
@@ -61,7 +61,7 @@
             "coinIcon": "Large"
         },
         {
-            "storeId": "com.gamevanilla.candymatch3.coinspack3",
+            "storeId": "com.lekkibeans.coinspack3",
             "numCoins": 950,
             "discount": 15,
             "mostPopular": true,
@@ -69,7 +69,7 @@
             "coinIcon": "MediumLarge"
         },
         {
-            "storeId": "com.gamevanilla.candymatch3.coinspack2",
+            "storeId": "com.lekkibeans.coinspack2",
             "numCoins": 400,
             "discount": 5,
             "mostPopular": false,
@@ -77,7 +77,7 @@
             "coinIcon": "MediumSmall"
         },
         {
-            "storeId": "com.gamevanilla.candymatch3.coinspack1",
+            "storeId": "com.lekkibeans.coinspack1",
             "numCoins": 150,
             "discount": 0,
             "mostPopular": false,
