@@ -17,6 +17,7 @@ namespace GameVanilla.Editor
         private List<Sprite> backgroundSprites = new List<Sprite>();
         private List<GameObject> cloudPrefabs = new List<GameObject>(); // New: Cloud Prefabs
         private Sprite bottomSprite; 
+        private Sprite topSprite; // New: Top Header Sprite 
 
         private int startLevel = 1;
         private float backgroundHeight = 3500f;
@@ -364,10 +365,11 @@ namespace GameVanilla.Editor
                 string ext = Path.GetExtension(fileName).ToLower();
                 if (ext != ".png" && ext != ".jpg" && ext != ".jpeg") continue;
                 
-                bool isLevelMap = fileName.StartsWith("LevelMap") && fileName != "LevelMapEnd.png";
-                bool isBottom = fileName.Equals("Rectangle.png", System.StringComparison.OrdinalIgnoreCase);
+                bool isLevelMap = fileName.StartsWith("LevelMap") && !fileName.Contains("LevelMapEnd");
+                bool isRectangle = fileName.Equals("Rectangle.png", System.StringComparison.OrdinalIgnoreCase);
+                bool isLevelMapEnd = fileName.Equals("LevelMapEnd.png", System.StringComparison.OrdinalIgnoreCase);
 
-                if (!isLevelMap && !isBottom) continue;
+                if (!isLevelMap && !isRectangle && !isLevelMapEnd) continue;
 
                 string relativePath = ToRelativePath(filePathRaw);
                 if (relativePath == null) continue;
@@ -381,7 +383,8 @@ namespace GameVanilla.Editor
 
                 if (sprite != null)
                 {
-                    if (isBottom) bottomSprite = sprite;
+                    if (isRectangle) bottomSprite = sprite;
+                    else if (isLevelMapEnd) topSprite = sprite;
                     else loadedSprites.Add(sprite);
                 }
                 else failedFiles.Add(fileName);
@@ -394,8 +397,11 @@ namespace GameVanilla.Editor
             }).ToList();
 
             string report = $"Loaded {backgroundSprites.Count} unique sprites.";
-            if (bottomSprite != null) report += "\nLoaded Bottom Sprite (Rectangle).";
+            if (bottomSprite != null) report += $"\nLoaded Bottom Sprite ({bottomSprite.name}).";
             else report += "\nWarning: Bottom Sprite (Rectangle) NOT found.";
+
+            if (topSprite != null) report += $"\nLoaded Top Sprite ({topSprite.name}).";
+            else report += "\nWarning: Top Sprite (LevelMapEnd) NOT found.";
             
             if (failedFiles.Count > 0) report += $"\nFailed: {failedFiles.Count} files.";
             Debug.Log($"[MapGenerator] {report}");
@@ -457,42 +463,27 @@ namespace GameVanilla.Editor
             List<Sprite> fullSequence = new List<Sprite>();
             for (int r = 0; r < repeatCount; r++) fullSequence.AddRange(backgroundSprites);
 
-            // CALCULATE DYNAMIC HEIGHT & OFFSETS
-            // The original coordinates are centered for a map of ~17500 height (5 maps).
-            // When we expand to 500 levels, the height grows, and the "Bottom" moves down.
-            // We must shift everything down to keep Level 1 at the bottom.
-            
-            float referenceHeight = 17500f; // Height of 5 maps (Original Backup Size)
-            float totalHeight = fullSequence.Count * backgroundHeight;
-            // Add some padding
-            float finalContentHeight = totalHeight + 2000f; 
-            
-            // If new map is taller, we shift content down by half the growth to stick to the bottom edge
-            // relative to the center pivot.
-            float heightGrowth = finalContentHeight - referenceHeight;
-            float verticalOffset = heightGrowth / 2f; 
+            // BOUNDING BOX VARIABLES
+            float minY = float.MaxValue;
+            float maxY = float.MinValue;
+ 
 
-            // OLD OBJECT CLEANUP (Safety First)
+            // OLD OBJECT CLEANUP
             RemoveDuplicateNamedObjects("MapHolder");
             RemoveDuplicateNamedObjects("Animations");
             RemoveDuplicateNamedObjects("ButtonHolder");
-            RemoveDuplicateNamedObjects("LevelmapButtons"); // Old name
+            RemoveDuplicateNamedObjects("LevelmapButtons"); 
             RemoveDuplicateNamedObjects("Bottom");
             
-            // A. Map Holder (Backgrounds)
+            // Create Holders (Positions will be set FINAL step)
             GameObject mapHolder = new GameObject("MapHolder");
             mapHolder.transform.SetParent(levelMapParent.transform, false);
             RectTransform mapHolderRect = mapHolder.AddComponent<RectTransform>();
-            // Original: -7961. New: Shift down by offset.
-            mapHolderRect.anchoredPosition = new Vector2(0, originalMapParentY - verticalOffset); 
-            
-            // B. Animations Holder
+
             GameObject animHolder = new GameObject("Animations");
             animHolder.transform.SetParent(levelMapParent.transform, false);
             RectTransform animRect = animHolder.AddComponent<RectTransform>();
-            animRect.anchoredPosition = new Vector2(0, originalMapParentY - verticalOffset);
             
-            // C. Button Holder
             GameObject buttonHolder = new GameObject("ButtonHolder");
             GameObject targetButtonParent = buttonParent != null ? buttonParent : buttonHolder; 
             
@@ -500,8 +491,6 @@ namespace GameVanilla.Editor
             {
                  buttonHolder.transform.SetParent(levelMapParent.transform, false);
                  RectTransform bhRect = buttonHolder.AddComponent<RectTransform>();
-                 // Original: 62. New: Shift down.
-                 bhRect.anchoredPosition = new Vector2(0, 62f - verticalOffset); 
                  targetButtonParent = buttonHolder;
             }
 
@@ -515,6 +504,12 @@ namespace GameVanilla.Editor
                 botRect.sizeDelta = new Vector2(1440, 2382);
                 Image botImg = bottomObj.AddComponent<Image>();
                 botImg.sprite = bottomSprite;
+                
+                // Track Bounds (local to mapHolder)
+                float topY = originalBottomLocalY + (2382f / 2f);
+                float botY = originalBottomLocalY - (2382f / 2f);
+                if (topY > maxY) maxY = topY;
+                if (botY < minY) minY = botY;
             }
 
             // 3. Place Level Maps
@@ -529,41 +524,108 @@ namespace GameVanilla.Editor
                 bgRect.anchoredPosition = new Vector2(0, currentLocalY);
                 Image bgImage = bgObj.AddComponent<Image>();
                 bgImage.sprite = sprite;
+                
+                // Track Bounds
+                float topY = currentLocalY + (backgroundHeight / 2f);
+                float botY = currentLocalY - (backgroundHeight / 2f);
+                if (topY > maxY) maxY = topY;
+                if (botY < minY) minY = botY;
+
                 currentLocalY += backgroundHeight;
             }
             
-            // 4. Generate Clouds
-            int cyclesNeeded = Mathf.CeilToInt(fullSequence.Count / 5.0f);
-            float cycleHeight = 17500f; 
-
-            for (int c = 0; c < cyclesNeeded; c++)
+            // 4. Place TOP Sprite (LevelMapEnd)
+            if (topSprite != null)
             {
-                float cycleOffsetY = c * cycleHeight;
-                if (cloudPrefabs.Count > 0)
-                {
-                    foreach(var cData in cloudPositions)
-                    {
-                        GameObject prefab = cloudPrefabs.FirstOrDefault(p => p.name == cData.name);
-                        if (prefab == null) continue;
-                        GameObject cloudObj = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
-                        cloudObj.transform.SetParent(animHolder.transform, false);
-                        RectTransform rt = cloudObj.GetComponent<RectTransform>();
-                        if (rt != null) rt.anchoredPosition = new Vector2(cData.pos.x, cData.pos.y + cycleOffsetY);
-                    }
-                }
+                 GameObject topObj = new GameObject("LevelMapEnd");
+                 topObj.transform.SetParent(mapHolder.transform, false);
+                 RectTransform topRect = topObj.AddComponent<RectTransform>();
+                 
+                 // PLACEMENT LOGIC:
+                 // We want the Header to sit ABOVE the last map.
+                 // Last Map Y (Center) = (currentLocalY - backgroundHeight).
+                 // Last Map Top Edge = Center + 1750.
+                 // Header Height = 2300. Header Half Height = 1150.
+                 // Header Center = (LastMapTopEdge - Overlap) + HeaderHalfHeight
+                 // Header Center = (LastMapY + 1750 - 100) + 1150 = LastMapY + 2800.
+                 
+                 float lastMapY = currentLocalY - backgroundHeight;
+                 float finalTopY = lastMapY + 2000f; // 100px Overlap
+                 
+                 topRect.anchoredPosition = new Vector2(0, finalTopY);
+                 topRect.sizeDelta = new Vector2(1440, 2300);
+                 Image topImg = topObj.AddComponent<Image>();
+                 topImg.sprite = topSprite;
+                 
+                 // Track Bounds
+                 float topY = finalTopY + (2300f / 2f);
+                 float botY = finalTopY - (2300f / 2f);
+                 if (topY > maxY) maxY = topY;
+                 if (botY < minY) minY = botY;
             }
+
+            // 5. FINALIZE LAYOUT (Center Content)
+            float totalVisualHeight = maxY - minY;
+            float contentCenterY = (maxY + minY) / 2f;
             
-            // 5. Resize CONTENT
+            // Resize Content Rect to EXACT Height
             RectTransform parentRect = levelMapParent.GetComponent<RectTransform>();
             if (parentRect != null)
             {
                 parentRect.anchorMin = new Vector2(0.5f, 0.5f);
                 parentRect.anchorMax = new Vector2(0.5f, 0.5f);
                 parentRect.pivot = new Vector2(0.5f, 0.5f);
-                parentRect.sizeDelta = new Vector2(1440f, finalContentHeight);
+                parentRect.sizeDelta = new Vector2(1440f, totalVisualHeight);
+            }
+            
+            // Position Holders so Visual Center aligns with Content Center (0,0)
+            Vector2 finalPos = new Vector2(0, -contentCenterY);
+            mapHolderRect.anchoredPosition = finalPos;
+            animRect.anchoredPosition = finalPos;
+            
+            // Button Holder Offset (Preserve relative diff)
+            if (buttonHolder != null && targetButtonParent == buttonHolder)
+            {
+                // Diff = 62 - (-7961) = 8023
+                buttonHolder.GetComponent<RectTransform>().anchoredPosition = new Vector2(0, finalPos.y + 8023f);
             }
 
-            // 6. Generate Buttons
+            // 5. Generate Clouds
+            int cyclesNeeded = Mathf.CeilToInt(fullSequence.Count / 5.0f);
+            float cycleHeight = 17500f; // 5 * 3500
+
+            for (int c = 0; c < cyclesNeeded; c++)
+            {
+                float cycleOffsetY = c * cycleHeight;
+                if (cloudPrefabs.Count > 0)
+                {
+                    // Create a Cycle Holder to reduce duplicate clutter
+                    GameObject cycleObj = new GameObject($"Clouds_Region_{c+1}");
+                    cycleObj.transform.SetParent(animHolder.transform, false);
+                    RectTransform cycleRect = cycleObj.AddComponent<RectTransform>();
+                    cycleRect.anchoredPosition = Vector2.zero; // Or offset? No, positions are absolute+offset.
+                    // Actually, if we set the offset on the PARENT, the children can keep original local POS!
+                    // Let's try that for cleaner logic:
+                    cycleRect.anchoredPosition = new Vector2(0, cycleOffsetY);
+                    
+                    foreach(var cData in cloudPositions)
+                    {
+                        GameObject prefab = cloudPrefabs.FirstOrDefault(p => p.name == cData.name);
+                        if (prefab == null) continue;
+                        GameObject cloudObj = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
+                        // Parent to the Cycle Holder
+                        cloudObj.transform.SetParent(cycleObj.transform, false);
+                        RectTransform rt = cloudObj.GetComponent<RectTransform>();
+                        // Since Parent has the Offset, child needs only ORIGINAL pos.
+                        if (rt != null) rt.anchoredPosition = cData.pos; 
+                    }
+                }
+            }
+            
+            // 6. Resize CONTENT (DONE ABOVE)
+
+
+            // 7. Generate Buttons
             int levelsToCreate = fullSequence.Count * 20;
 
             for (int i = 0; i < levelsToCreate; i++)
@@ -594,13 +656,23 @@ namespace GameVanilla.Editor
                 btnRect.anchoredPosition = new Vector2(templatePos.x, finalY);
             }
 
-            RemoveDuplicateNamedObjects("LevelMapEnd");
+            // RemoveDuplicateNamedObjects("LevelMapEnd"); // DANGEROUS: Deletes the one we just made! Setup cleanup handles this.
             
             // RESET VIEW TO BOTTOM (Level 1)
-            // Center is 0. Bottom is -Height/2. To see bottom, we move Content UP by +Height/2.
             if (parentRect != null)
             {
-               parentRect.anchoredPosition = new Vector2(0, finalContentHeight / 2f);
+               float viewportHeight = 2300f; // Minimal Default
+               if (sr != null && sr.viewport != null) viewportHeight = sr.viewport.rect.height;
+               else if (parentRect.parent != null) 
+               {
+                   RectTransform vp = parentRect.parent.GetComponent<RectTransform>();
+                   if (vp != null) viewportHeight = vp.rect.height;
+               }
+
+               // Align Content Bottom with Screen Bottom
+               float visualHeight = parentRect.sizeDelta.y;
+               float startY = (visualHeight - viewportHeight) / 2f;
+               parentRect.anchoredPosition = new Vector2(0, startY);
             }
 
             EditorUtility.DisplayDialog("Success", $"Generated EXACT REPLICA for levels {startLevel} to {startLevel + levelsToCreate - 1}.\nAligned to Bottom.", "OK");
